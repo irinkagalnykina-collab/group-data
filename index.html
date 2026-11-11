@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Посещаемость группы 26.Б01-э</title>
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 22px; font-family: Arial, sans-serif; color: #202938; background: #f4f6fa; }
+    .wrap { max-width: 1100px; margin: 0 auto; }
+    h1 { margin: 0 0 8px; font-size: 28px; }
+    .sub { color: #667085; margin: 0 0 22px; }
+    .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 18px; }
+    .card, .panel { background: white; border-radius: 14px; padding: 18px; box-shadow: 0 2px 10px #1822300d; }
+    .metric { font-size: 30px; font-weight: 700; margin-top: 8px; }
+    .muted { color: #667085; font-size: 14px; }
+    .charts { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .panel h2 { font-size: 18px; margin: 0 0 10px; }
+    .chart { height: 340px; width: 100%; }
+    .note { margin-top: 16px; background: #eef4ff; border-radius: 12px; padding: 14px 16px; color: #344054; line-height: 1.5; }
+    .error { background: #fff0f0; color: #a12626; padding: 14px; border-radius: 10px; margin: 16px 0; }
+    @media (max-width: 720px) {
+      body { padding: 14px; }
+      h1 { font-size: 23px; }
+      .cards, .charts { grid-template-columns: 1fr; }
+      .chart { height: 300px; }
+    }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Посещаемость группы 26.Б01-э</h1>
+  <p class="sub">Сводная статистика посещения занятий</p>
+  <div id="error"></div>
+  <section class="cards">
+    <div class="card"><div class="muted">Средняя посещаемость</div><div class="metric" id="average">—</div></div>
+    <div class="card"><div class="muted">Количество студентов</div><div class="metric" id="students">—</div></div>
+    <div class="card"><div class="muted">Количество занятий</div><div class="metric" id="lessons">—</div></div>
+  </section>
+  <section class="charts">
+    <div class="panel"><h2>Посещаемость по занятиям</h2><div id="lineChart" class="chart"></div></div>
+    <div class="panel"><h2>Распределение студентов</h2><div id="barChart" class="chart"></div></div>
+  </section>
+  <div class="note">
+    <strong>Примечание.</strong> Данные представлены в обезличенном виде: вместо фамилий используются коды студентов.
+    Значение 1 означает присутствие, 0 — отсутствие. Пустые ячейки не учитываются в расчёте.
+    Источник данных: учебная таблица посещаемости группы.
+  </div>
+</div>
+<script>
+async function loadData() {
+  try {
+    const response = await fetch('./attendance.csv');
+    if (!response.ok) throw new Error('Не удалось загрузить attendance.csv. Проверьте, что файл находится в том же репозитории.');
+    const text = await response.text();
+    const rows = parseCSV(text.replace(/^\uFEFF/, ''));
+    if (rows.length < 2) throw new Error('В CSV нет строк с данными.');
+
+    const header = rows[0];
+    const dateColumns = header.slice(1);
+    const records = rows.slice(1).filter(row => row[0] && row[0].trim() !== '');
+    const attendanceByLesson = dateColumns.map((_, i) => {
+      let present = 0, known = 0;
+      records.forEach(row => {
+        const value = (row[i + 1] ?? '').trim();
+        if (value === '1' || value === '0') {
+          known++;
+          if (value === '1') present++;
+        }
+      });
+      return known ? present / known * 100 : 0;
+    });
+
+    let totalPresent = 0, totalKnown = 0;
+    const studentRates = records.map(row => {
+      let present = 0, known = 0;
+      dateColumns.forEach((_, i) => {
+        const value = (row[i + 1] ?? '').trim();
+        if (value === '1' || value === '0') {
+          known++;
+          if (value === '1') present++;
+        }
+      });
+      totalPresent += present;
+      totalKnown += known;
+      return known ? present / known * 100 : 0;
+    });
+
+    const average = totalKnown ? totalPresent / totalKnown * 100 : 0;
+    document.getElementById('average').textContent = average.toFixed(1) + '%';
+    document.getElementById('students').textContent = records.length;
+    document.getElementById('lessons').textContent = dateColumns.length;
+
+    const line = echarts.init(document.getElementById('lineChart'));
+    line.setOption({
+      tooltip: { trigger: 'axis', valueFormatter: v => Number(v).toFixed(1) + '%' },
+      grid: { left: 48, right: 18, top: 28, bottom: 55 },
+      xAxis: { type: 'category', data: dateColumns, axisLabel: { rotate: 35, interval: 0 } },
+      yAxis: { type: 'value', min: 0, max: 100, axisLabel: { formatter: '{value}%' } },
+      series: [
+        { name: 'Посещаемость', type: 'line', smooth: true, data: attendanceByLesson.map(v => +v.toFixed(1)), symbolSize: 7 },
+        { name: 'Среднее значение', type: 'line', data: dateColumns.map(() => +average.toFixed(1)), symbol: 'none', lineStyle: { type: 'dashed', width: 2 }, tooltip: { show: false } }
+      ]
+    });
+
+    const bands = [
+      { name: 'Менее 25%', min: -0.001, max: 25 },
+      { name: '25–50%', min: 25, max: 50 },
+      { name: '50–75%', min: 50, max: 75 },
+      { name: '75% и более', min: 75, max: 100.001 }
+    ];
+    const counts = bands.map(b => studentRates.filter(v => v >= b.min && v < b.max).length);
+    const bar = echarts.init(document.getElementById('barChart'));
+    bar.setOption({
+      tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+      grid: { left: 88, right: 20, top: 25, bottom: 35 },
+      xAxis: { type: 'value', minInterval: 1 },
+      yAxis: { type: 'category', data: bands.map(b => b.name) },
+      series: [{ type: 'bar', data: counts, barMaxWidth: 38, label: { show: true, position: 'right' } }]
+    });
+    window.addEventListener('resize', () => { line.resize(); bar.resize(); });
+  } catch (error) {
+    document.getElementById('error').innerHTML = '<div class="error">' + escapeHTML(error.message) + '</div>';
+  }
+}
+function parseCSV(text) {
+  const firstLine = text.split(/\r?\n/, 1)[0] || '';
+  const delimiter = firstLine.includes(';') ? ';' : ',';
+  const result = [];
+  let row = [], cell = '', quoted = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (c === '"') {
+      if (quoted && text[i + 1] === '"') { cell += '"'; i++; }
+      else quoted = !quoted;
+    } else if (c === delimiter && !quoted) {
+      row.push(cell.trim()); cell = '';
+    } else if ((c === '\n' || c === '\r') && !quoted) {
+      if (c === '\r' && text[i + 1] === '\n') i++;
+      row.push(cell.trim());
+      if (row.some(v => v !== '')) result.push(row);
+      row = []; cell = '';
+    } else cell += c;
+  }
+  row.push(cell.trim());
+  if (row.some(v => v !== '')) result.push(row);
+  return result;
+}
+function escapeHTML(value) {
+  return String(value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+loadData();
+</script>
+</body>
+</html>
